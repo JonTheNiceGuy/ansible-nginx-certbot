@@ -1,0 +1,85 @@
+{# ################################################################# #}
+{# Reusable values for later - note, needs set t=namespace() to work #}
+{# ################################################################# #}
+{%- set t.server_name = item.key -%}
+{%- if item.value.www_prefix | default(true) -%}
+  {%- set t.server_name = t.server_name + " www." + item.key -%}
+{%- endif -%}
+{%- for alt in item.value.alts | default([]) -%}
+  {%- set t.server_name = t.server_name + " " + alt -%}
+  {%- if item.value.www_prefix | default(true) -%}
+    {%- set t.server_name = t.server_name + " www." + alt -%}
+  {%- endif -%}
+{%- endfor -%}
+{%- set t.primary_server_name = item.key %}
+{# ################################################################# #}
+{# Reusable values for later - note, needs set t=namespace() to work #}
+{# ################################################################# #}
+{# ############### #}
+{# Server Settings #}
+{# ############### #}
+{% if item.listenipv4 | default(true) %}
+        listen {% if item.ipv4host is defined %}{{ item.ipv4host }}:{% endif %}{{ item.port | default(443) }} ssl http2;
+{% endif %}
+{% if item.listenipv6 | default(true) %}
+        listen {{ item.ipv6host | default('[::]') }}:{{ item.port | default(443) }} ssl http2;
+{% endif %}
+        server_name {{ t.server_name | default('_') }};
+
+        access_log /var/log/nginx/{{ t.primary_server_name }}_https_access.log;
+        error_log /var/log/nginx/{{ t.primary_server_name }}_https_error.log;
+
+        client_max_body_size {{ item.max_body_size | default('50G') }};
+        client_body_buffer_size {{ item.body_buffer_size | default('25M') }};
+{# ############### #}
+{# Server Settings #}
+{# ############### #}
+
+{# ##################### #}
+{# Certificate Locations #}
+{# ##################### #}
+{% if enable_letsencrypt | default(true) %}
+        ssl_certificate         /etc/letsencrypt/live/{{ t.primary_server_name }}/fullchain.pem;
+        ssl_certificate_key     /etc/letsencrypt/live/{{ t.primary_server_name }}/privkey.pem;
+        ssl_trusted_certificate /etc/letsencrypt/live/{{ t.primary_server_name }}/fullchain.pem;
+{% else %}
+        ssl_certificate         {{ tls_certificate | default('/etc/ssl/certs/ssl-cert-snakeoil.pem') }};
+        ssl_certificate_key     {{ tls_certificate_key | default('/etc/ssl/private/ssl-cert-snakeoil.key') }};
+{% endif %}
+{# ##################### #}
+{# Certificate Locations #}
+{# ##################### #}
+
+{# ########################################################### #}
+{# SSL Config based on values supplied from the following page #}
+{#             https://ssl-config.mozilla.org/                 #}
+{# ########################################################### #}
+        ssl_session_timeout 1d;
+        ssl_session_cache shared:MozSSL:10m;
+        ssl_session_tickets off;
+
+        ssl_dhparam /etc/nginx/dhparams.pem;
+
+{% if item.mozilla_config | default('intermediate') == 'intermediate' %}{# For > Firefox 27, Android 4.4.2, Chrome 31, Edge 1, IE11 on Win7, Java 8 #}
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+        ssl_prefer_server_ciphers off;
+{% elif item.mozilla_config | default('intermediate') == 'modern' %}{# For > Firefox 63, Android 10, Chrome 70, Edge 75, Java 11 #}
+        ssl_protocols TLSv1.3;
+        ssl_prefer_server_ciphers off;
+{% else %}{# For > Firefox 1, Android 2.3, Chrome 1, Edge 12, IE8, Java 6 #}
+        ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3;
+        ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA:ECDHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA256:DHE-RSA-AES256-SHA256:AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA256:AES256-SHA256:AES128-SHA:AES256-SHA:DES-CBC3-SHA;
+        ssl_prefer_server_ciphers on;
+{% endif %}
+
+{% if item.HSTS | default(false) %}
+        add_header Strict-Transport-Security "max-age=63072000" always;
+{% endif %}
+
+        ssl_stapling on;
+        ssl_stapling_verify on;
+{# ########################################################### #}
+{# SSL Config based on values supplied from the following page #}
+{#             https://ssl-config.mozilla.org/                 #}
+{# ########################################################### #}

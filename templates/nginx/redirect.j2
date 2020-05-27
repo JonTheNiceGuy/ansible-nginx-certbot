@@ -1,0 +1,7 @@
+{% set t = namespace() %}
+server {
+{% include('templates/nginx/include_standard_https.j2') %}
+        location / {
+                rewrite ^ https://{{ target_server_name }}$request_uri? permanent;
+        }
+}

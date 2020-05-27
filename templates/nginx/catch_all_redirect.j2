@@ -1,0 +1,18 @@
+server {
+        listen 80;
+
+        server_name _;
+
+        access_log /var/log/nginx/default_access.log;
+        error_log /var/log/nginx/default_error.log;
+
+        root /var/www/html/;
+
+        location /.well-known/acme-challenge {
+                try_files $uri $uri/ =404;
+        }
+
+        location / {
+                return 301 https://$host$request_uri;
+        }
+}

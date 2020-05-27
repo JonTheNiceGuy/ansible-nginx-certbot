@@ -1,0 +1,78 @@
+{% set t = namespace() %}
+server {
+{% include('templates/nginx/include_standard_https.j2') %}
+
+        root {{ webroot | default('/var/www/html/') }};
+        index index.php index.html index.htm index.nginx-debian.html;
+{% if includes | default('') != '' %}
+{% if includes is iterable and includes is not string %}
+{% for i in includes %}
+        include {{ i }};
+{% endfor %}
+{% elif includes is string %}
+        include {{ includes }};
+{% endif %}
+{% endif %}
+
+{% if wordpress | default(false) %}
+        location = /favicon.ico {
+                log_not_found off;
+                access_log off;
+        }
+
+        location = /robots.txt {
+                allow all;
+                log_not_found off;
+                access_log off;
+        }
+
+        # Deny all attempts to access hidden files such as .htaccess, .htpasswd, .DS_Store (Mac).
+        # Keep logging the requests to parse later (or to pass to firewall utilities such as fail2ban)
+        location ~ /\. {
+                deny all;
+        }
+
+        # Deny access to any files with a .php extension in the uploads directory for the single site
+        location ~ ^/wp-content/uploads/.*\.php$ {
+                deny all;
+        }
+
+
+        # Deny access to any files with a .php extension in the uploads directory
+        # Works in sub-directory installs and also in multisite network
+        # Keep logging the requests to parse later (or to pass to firewall utilities such as fail2ban)
+        location ~* /(?:uploads|files)/.*\.php$ {
+                deny all;
+        }
+{% endif %}
+
+        location / {
+{% if pretty_urls | default(true) %}
+                try_files $uri $uri/ /index.php?$args;
+{% else %}
+                try_files $uri $uri/ =404;
+                autoindex on;
+{% endif %}
+        }
+
+{% for location in locations | default([]) %}
+        location {{ location }}/ {
+{% if pretty_urls | default(true) %}
+                try_files $uri $uri/ /{{ location }}/index.php?$args;
+{% else %}
+                try_files $uri $uri/ =404;
+                autoindex on;
+{% endif %}
+        }
+{% endfor %}
+
+        location ~ \.php$ {
+                include snippets/fastcgi-php.conf;
+                {% if extra_params is defined %}{{ extra_params }}{% endif %}
+                fastcgi_pass unix:/var/run/php/php{{ php_version }}-fpm.sock;
+                fastcgi_intercept_errors on;
+                fastcgi_buffers 16 16k;
+                fastcgi_buffer_size 32k;
+        }
+}
+

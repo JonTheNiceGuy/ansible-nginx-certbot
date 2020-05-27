@@ -1,0 +1,180 @@
+---
+- name: Install packages
+  apt:
+    name: |
+      [
+        "nginx",
+        "mailutils",
+        "ssl-cert",
+        "php{{ php_version }}-fpm",
+        "php{{ php_version }}-gd",
+        "php{{ php_version }}-json",
+        "php{{ php_version }}-intl",
+        "php{{ php_version }}-bcmath",
+        "php{{ php_version }}-bz2",
+        "php{{ php_version }}-cli",
+        "php{{ php_version }}-curl",
+        "php{{ php_version }}-mbstring",
+        "php{{ php_version }}-mysql",
+        "php{{ php_version }}-sqlite3",
+        "php{{ php_version }}-xml",
+        "php{{ php_version }}-xsl",
+        "php{{ php_version }}-zip",
+        "php-imagick",
+        "mariadb-server",
+        "mariadb-client",
+        "python3-pip"
+      ]
+    state: present
+
+- name: Install certbot
+  pip:
+    name: certbot-nginx
+    state: present
+
+- name: Generate dhparams
+  shell: openssl dhparam -out /etc/nginx/dhparams.pem 4096
+  args:
+    creates: /etc/nginx/dhparams.pem
+
+- name: Remove upstream nginx default server
+  file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Restart nginx
+
+- name: Create the holding location for web sites and supporting features
+  file:
+    name: "/var/www/{{ item.key }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: 0755
+  loop: "{{ wordpress_sites | default({}) | combine(basic_sites | default({})) | dict2items }}"
+  loop_control:
+    label: "{{ item.key | default('MISSING') }}"
+
+- name: Create our nginx default server
+  template:
+    dest: /etc/nginx/sites-available/default_server
+    src: templates/nginx/catch_all_redirect.j2
+    owner: root
+    group: root
+    mode: 0644
+  notify: Restart nginx
+
+- name: Flush Handlers
+  meta: flush_handlers
+
+- name: Create certificates with CertBot
+  shell: "certbot certonly --webroot --webroot-path /var/www/html -d {{ item.key }}{% if item.value.www_prefix | default(true) %} -d www.{{ item.key }}{% endif %}{% for alt in item.value.alts | default([]) %} -d {{ alt }}{% if item.value.www_prefix | default(true) %} -d www.{{ alt }}{% endif %}{% endfor %}"
+  args:
+    creates: "/etc/letsencrypt/renewal/{{ item.key }}.conf"
+  loop: "{{ all_sites | dict2items }}"
+  loop_control:
+    label: "{{ item.key | default('MISSING') }}"
+
+- name: Fix certbot renewal - authenticator
+  lineinfile:
+    path: "/etc/letsencrypt/renewal/{{ item.key }}.conf"
+    regexp: "authenticator = webroot"
+    line: "authenticator = nginx"
+  loop: "{{ all_sites | dict2items }}"
+  loop_control:
+    label: "{{ item.key | default('MISSING') }}"
+
+- name: Fix certbot renewal - installer
+  lineinfile:
+    path: "/etc/letsencrypt/renewal/{{ item.key }}.conf"
+    regexp: "webroot_path = .*"
+    line: "installer = nginx"
+  loop: "{{ all_sites | dict2items }}"
+  loop_control:
+    label: "{{ item.key | default('MISSING') }}"
+
+- name: Fix certbot renewal - webroot_map
+  lineinfile:
+    path: "/etc/letsencrypt/renewal/{{ item.key }}.conf"
+    regexp: '\[\[webroot_map\]\]'
+    state: absent
+  loop: "{{ all_sites | dict2items }}"
+  loop_control:
+    label: "{{ item.key | default('MISSING') }}"
+
+- name: Fix certbot renewal - webroot_map entries
+  lineinfile:
+    path: "/etc/letsencrypt/renewal/{{ item.key }}.conf"
+    regexp: "({{ item.key | regex_replace('\\.', '\\\\.') }}{% if item.value.www_prefix | default(true) %} www\\.{{ item.key | regex_replace('\\.', '\\\\.') }}{% endif %}{% for alt in item.value.alts | default([]) %} {{ alt | regex_replace('\\.', '\\\\.') }}{% if item.value.www_prefix | default(true) %} www\\.{{ alt | regex_replace('\\.', '\\\\.') }}{% endif %}{% endfor %}) = .*"
+    state: absent
+  loop: "{{ all_sites | dict2items }}"
+  loop_control:
+    label: "{{ item.key | default('MISSING') }}"
+
+- name: Create wordpress site configs
+  template:
+    dest: "/etc/nginx/sites-available/{{ item.key }}"
+    src: templates/nginx/https_server.j2
+    owner: root
+    group: root
+    mode: 0644
+  vars:
+    webroot: "/var/www/{{ item.key }}"
+    wordpress: true
+    locations: "{{ item.value.locations | default([]) }}"
+    includes: "{{ item.value.includes | default('') }}"
+  notify: Restart nginx
+  loop: "{{ wordpress_sites | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key | default('MISSING') }}"
+
+- name: Create simple site configs
+  template:
+    dest: "/etc/nginx/sites-available/{{ item.key }}"
+    src: templates/nginx/https_server.j2
+    owner: root
+    group: root
+    mode: 0644
+  vars:
+    webroot: "/var/www/{{ item.key }}"
+  notify: Restart nginx
+  loop: "{{ basic_sites | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key | default('MISSING') }}"
+
+- name: Create proxy configs
+  template:
+    dest: "/etc/nginx/sites-available/{{ item.key }}"
+    src: templates/nginx/proxy_https.j2
+    owner: root
+    group: root
+    mode: 0644
+  notify: Restart nginx
+  loop: "{{ proxy_sites | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key | default('MISSING') }}"
+
+- name: Create redirect configs
+  template:
+    dest: "/etc/nginx/sites-available/{{ item.key }}"
+    src: templates/nginx/redirect.j2
+    owner: root
+    group: root
+    mode: 0644
+  notify: Restart nginx
+  vars:
+    target_server_name: "{{ item.value.target }}"
+  loop: "{{ redirect_sites | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key | default('MISSING') }}"
+
+- name: Link our servers to be enabled
+  file:
+    src: "/etc/nginx/sites-available/{{ item.key }}"
+    dest: "/etc/nginx/sites-enabled/{{ item.key }}"
+    owner: root
+    group: root
+    state: link
+  notify: Restart nginx
+  loop: "{{ {'default_server': [] } | combine(all_sites) | dict2items }}"
+  loop_control:
+    label: "{{ item.key | default('MISSING') }}"
