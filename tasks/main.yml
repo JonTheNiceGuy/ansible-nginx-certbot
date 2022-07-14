@@ -8,7 +8,6 @@
         "ssl-cert",
         "php{{ php_version }}-fpm",
         "php{{ php_version }}-gd",
-        "php{{ php_version }}-json",
         "php{{ php_version }}-intl",
         "php{{ php_version }}-bcmath",
         "php{{ php_version }}-bz2",
@@ -29,6 +28,7 @@
 
 - name: Install certbot
   pip:
+    executable: /usr/bin/pip3
     name: certbot-nginx
     state: present
 
@@ -121,6 +121,7 @@
     webroot: "/var/www/{{ item.key }}"
     wordpress: true
     locations: "{{ item.value.locations | default([]) }}"
+    proxy_locations: "{{ item.value.proxy_locations | default({}) }}"
     includes: "{{ item.value.includes | default('') }}"
   notify: Restart nginx
   loop: "{{ wordpress_sites | default({}) | dict2items }}"
@@ -176,5 +177,32 @@
     state: link
   notify: Restart nginx
   loop: "{{ {'default_server': [] } | combine(all_sites) | dict2items }}"
+  loop_control:
+    label: "{{ item.key | default('MISSING') }}"
+
+- name: Remove unused enabled services
+  file:
+    path: "/etc/nginx/sites-enabled/{{ item.key }}"
+    state: absent
+  notify: Restart nginx
+  loop: "{{ remove_sites | dict2items }}"
+  loop_control:
+    label: "{{ item.key | default('MISSING') }}"
+
+- name: Remove unused available services
+  file:
+    path: "/etc/nginx/sites-available/{{ item.key }}"
+    state: absent
+  notify: Restart nginx
+  loop: "{{ remove_sites | dict2items }}"
+  loop_control:
+    label: "{{ item.key | default('MISSING') }}"
+
+- name: Remove unused Certificate Renewal config
+  file:
+    path: "/etc/letsencrypt/renewal/{{ item.key }}.conf"
+    state: absent
+  notify: Restart nginx
+  loop: "{{ remove_sites | dict2items }}"
   loop_control:
     label: "{{ item.key | default('MISSING') }}"

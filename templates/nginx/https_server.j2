@@ -59,6 +59,31 @@ server {
 {% endif %}
         }
 
+{% for location in proxy_locations | default({}) | dict2items %}
+        location /{{ location.key }}/ {
+                proxy_pass {{ location.value.target }};
+{% if location.value.proxy_version_11 | default(true) | bool %}
+                proxy_http_version 1.1;
+{% endif %}
+{% if location.value.upgrade_connection | default(true) | bool %}
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection $connection_upgrade;
+{% endif %}
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For {{ location.value.x_forwarded_for | default('$remote_addr') }};
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header X-Forwarded-Port $server_port;
+                proxy_set_header X-Forwarded-Host $host;
+{% if location.value.forward_http_host_header | default(true) | bool %}
+                proxy_set_header Host $http_host;
+{% endif %}
+{% if location.value.forward_host_header | default(true) | bool %}
+                proxy_set_header Host $host;
+{% endif %}
+
+        }
+{% endfor %}
+
 {% for location in locations | default([]) %}
         location {{ location }}/ {
 {% if pretty_urls | default(true) %}
@@ -72,7 +97,9 @@ server {
 
         location ~ \.php$ {
                 include snippets/fastcgi-php.conf;
-                {% if extra_params is defined %}{{ extra_params }}{% endif %}
+                {%- if extra_params is defined %}
+                {{ extra_params }}
+                {%- endif %}
                 fastcgi_pass unix:/var/run/php/php{{ php_version }}-fpm.sock;
                 fastcgi_intercept_errors on;
                 fastcgi_buffers 16 16k;
